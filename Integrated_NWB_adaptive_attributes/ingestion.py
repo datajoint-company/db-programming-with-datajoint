@@ -125,31 +125,44 @@ for fname in fnames[:3]:
     brain_region = re.split(',\s?', ie_location)[-1]
     coord_ap_ml_dv = re.findall('\d+.\d+', ie_location)
 
+    # -- Whole Cell Device
+    ie_device = nwb['general']['intracellular_ephys']['whole_cell']['device'][()]
+    nwb_device = pynwb.device.Device(name=ie_device)
+    if {'device_name': ie_device} not in intracellular.WholeCellDevice.proj():
+        intracellular.WholeCellDevice.insert1({'device_name': ie_device,
+                                               'nwb_device': nwb_device})
+
+    # -- BrainLocation
     # hemisphere: left-hemisphere is ipsi, so anything contra is right
     brain_region, hemisphere = utilities.get_brain_hemisphere(brain_region)
     brain_location = {'brain_region': brain_region,
                       'hemisphere': hemisphere}
-    # -- BrainLocation
     brain_location = dict(brain_location,
                           coordinate_ref='bregma',
                           coordinate_ap=round(Decimal(coord_ap_ml_dv[0]), 2),
                           coordinate_ml=round(Decimal(coord_ap_ml_dv[1]), 2),
                           coordinate_dv=round(Decimal(coord_ap_ml_dv[2]), 2))
+
     if brain_location not in intracellular.BrainLocation.proj():
         intracellular.BrainLocation.insert1(brain_location)
 
-    # -- Whole Cell Device
-    ie_device = nwb['general']['intracellular_ephys']['whole_cell']['device'][()]
-    if {'device_name': ie_device} not in intracellular.WholeCellDevice.proj():
-        intracellular.WholeCellDevice.insert1({'device_name': ie_device, 'device_desc': devices[ie_device]})
+        # -- Intracellular Electrode
+        ic_electrode = pynwb.icephys.IntracellularElectrode(
+            name=brain_location['hemisphere'] + brain_location['brain_region'],
+            device=nwb_device, description='N/A', filtering='low-pass: 10kHz',
+            location='; '.join([f'{k}: {str(v)}' for k, v in brain_location.items()]))
+
+        intracellular.IntracellularElectrode.insert1({'brain_region': brain_region,
+                                                      'hemisphere': hemisphere,
+                                                      'device_name': ie_device,
+                                                      'ic_electrode': ic_electrode})
 
     # -- Cell
     cell_id = re.split('.nwb', session_info['session_id'])[0]
-    cell_key = dict({**subject_info, **session_info, **brain_location},
-                    cell_id=cell_id,
-                    cell_type='N/A',
-                    device_name=ie_device)
+    cell_key = {**subject_info, **session_info, **brain_location, 'cell_id': cell_id}
     if cell_key not in intracellular.Cell.proj():
-        intracellular.Cell.insert1(cell_key, ignore_extra_fields=True)
+        intracellular.Cell.insert1(dict(cell_key, cell_type='N/A',
+                                        brain_region=brain_region,
+                                        hemisphere=hemisphere), ignore_extra_fields=True)
 
     nwb.close()

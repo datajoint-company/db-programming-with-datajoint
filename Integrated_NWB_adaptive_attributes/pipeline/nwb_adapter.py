@@ -1,6 +1,10 @@
 import datajoint as dj
 import pathlib
+import pynwb
 from pynwb import NWBHDF5IO
+import warnings
+
+warnings.filterwarnings('ignore')
 
 exported_nwb_dir = dj.config['stores']['nwb_store']['stage']
 
@@ -19,7 +23,7 @@ class NWBFile(dj.AttributeAdapter):
         save_file_name = ''.join([nwb.identifier, '.nwb'])
         save_fp = nwb_session_dir / save_file_name
 
-        print(f'Write PatchClampSeries: {save_file_name}')
+        print(f'Write NWBFile: {save_file_name}')
         _write_nwb(save_fp, nwb)
         return save_fp.as_posix()
 
@@ -30,13 +34,45 @@ class NWBFile(dj.AttributeAdapter):
         return nwb
 
 
+class Device(dj.AttributeAdapter):
+    """ Adapter for: pynwb.device.Device"""
+    attribute_type = 'longblob'
+
+    def put(self, nwb_device):
+        return {'name': nwb_device.name}
+
+    def get(self, device_dict):
+        return pynwb.device.Device(name=device_dict['name'])
+
+
+class IntracellularElectrode(dj.AttributeAdapter):
+    """ Adapter for: pynwb.icephys.IntracellularElectrode"""
+    attribute_type = 'longblob'
+
+    def put(self, electrode):
+        return dict(name=electrode.name, device=Device().put(electrode.device),
+                    description=electrode.description, filtering=electrode.filtering,
+                    location=electrode.location)
+
+    def get(self, ic_electrode_dict):
+        return pynwb.icephys.IntracellularElectrode(
+            name=ic_electrode_dict['name'],
+            device=Device().get(ic_electrode_dict['device']),
+            description=ic_electrode_dict['description'],
+            filtering=ic_electrode_dict['filtering'],
+            location=ic_electrode_dict['location'])
+
+
 class PatchClampSeries(dj.AttributeAdapter):
     """ Adapter for: pynwb.icephys.PatchClampSeries"""
     attribute_type = 'filepath@nwb_store'
 
-    def put(self, nwb):
-        patch_clamp = [obj for obj in nwb.objects.values()
-                       if obj.neurodata_type == 'PatchClampSeries'][0]
+    def put(self, patch_clamp):
+        nwb = patch_clamp.parent
+
+        nwb.add_device(patch_clamp.electrode.device)
+        nwb.add_ic_electrode(patch_clamp.electrode)
+        nwb.add_acquisition(patch_clamp)
 
         save_file_name = ''.join([nwb.identifier + '_{}'.format(patch_clamp.name), '.nwb'])
         save_fp = nwb_mp_dir / save_file_name
@@ -54,37 +90,6 @@ class PatchClampSeries(dj.AttributeAdapter):
         return patch_clamp
 
 
-class CurrentClampStimulusSeries(dj.AttributeAdapter):
-    """ Adapter for: pynwb.icephys.CurrentClampStimulusSeries"""
-    attribute_type = 'filepath@nwb_store'
-
-    def put(self, nwb):
-        current_stim = [obj for obj in nwb.objects.values()
-                        if obj.neurodata_type == 'CurrentClampStimulusSeries'][0]
-
-        save_file_name = ''.join([nwb.identifier + '_{}'.format(current_stim.name), '.nwb'])
-        save_fp = nwb_mp_dir / save_file_name
-
-        print(f'Write CurrentClampStimulusSeries: {save_file_name}')
-        _write_nwb(save_fp, nwb, manager=nwb.io.manager)
-        return save_fp.as_posix()
-
-    def get(self, path):
-        io = NWBHDF5IO(str(pathlib.Path(path)), mode='r')
-        nwb = io.read()
-        current_stim = [obj for obj in nwb.objects.values()
-                        if obj.neurodata_type == 'CurrentClampStimulusSeries'][0]
-        current_stim.io = io
-        return current_stim
-
-
-# ---- instantiate dj.AttributeAdapter objects ----
-
-nwb_file = NWBFile()
-patch_clamp_series = PatchClampSeries()
-current_stim_series = CurrentClampStimulusSeries()
-
-
 # ============= HELPER FUNCTIONS ===============
 
 def _write_nwb(save_fp, nwb2write, manager=None):
@@ -95,3 +100,11 @@ def _write_nwb(save_fp, nwb2write, manager=None):
         if save_fp.exists():
             save_fp.unlink()
         raise e
+
+
+# ==== instantiate dj.AttributeAdapter objects ====
+
+nwb_file = NWBFile()
+device = Device()
+patch_clamp_series = PatchClampSeries()
+ic_electrode = IntracellularElectrode()
