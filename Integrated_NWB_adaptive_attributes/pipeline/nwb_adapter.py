@@ -18,24 +18,16 @@ class NWBFile(dj.AttributeAdapter):
     def put(self, nwb):
         save_file_name = ''.join([nwb.identifier, '.nwb'])
         save_fp = nwb_session_dir / save_file_name
-        try:
-            with NWBHDF5IO(save_fp.as_posix(), mode='w') as io:
-                io.write(nwb)
-                print(f'Write NWB 2.0 file: {save_file_name}')
-            return save_fp.as_posix()
-        except Exception as e:
-            if save_fp.exists():
-                save_fp.unlink()
-            raise e
+
+        print(f'Write PatchClampSeries: {save_file_name}')
+        _write_nwb(save_fp, nwb)
+        return save_fp.as_posix()
 
     def get(self, path):
         io = NWBHDF5IO(str(pathlib.Path(path)), mode='r')
         nwb = io.read()
         nwb.io = io
         return nwb
-
-
-nwb_file = NWBFile()
 
 
 class PatchClampSeries(dj.AttributeAdapter):
@@ -48,15 +40,10 @@ class PatchClampSeries(dj.AttributeAdapter):
 
         save_file_name = ''.join([nwb.identifier + '_{}'.format(patch_clamp.name), '.nwb'])
         save_fp = nwb_mp_dir / save_file_name
-        try:
-            with NWBHDF5IO(save_fp.as_posix(), mode='w', manager=nwb.io.manager) as io:
-                io.write(nwb)
-                print(f'Write PatchClampSeries: {save_file_name}')
-            return save_fp.as_posix()
-        except Exception as e:
-            if save_fp.exists():
-                save_fp.unlink()
-            raise e
+
+        print(f'Write PatchClampSeries: {save_file_name}')
+        _write_nwb(save_fp, nwb, manager=nwb.io.manager)
+        return save_fp.as_posix()
 
     def get(self, path):
         io = NWBHDF5IO(str(pathlib.Path(path)), mode='r')
@@ -67,4 +54,44 @@ class PatchClampSeries(dj.AttributeAdapter):
         return patch_clamp
 
 
+class CurrentClampStimulusSeries(dj.AttributeAdapter):
+    """ Adapter for: pynwb.icephys.CurrentClampStimulusSeries"""
+    attribute_type = 'filepath@nwb_store'
+
+    def put(self, nwb):
+        current_stim = [obj for obj in nwb.objects.values()
+                        if obj.neurodata_type == 'CurrentClampStimulusSeries'][0]
+
+        save_file_name = ''.join([nwb.identifier + '_{}'.format(current_stim.name), '.nwb'])
+        save_fp = nwb_mp_dir / save_file_name
+
+        print(f'Write CurrentClampStimulusSeries: {save_file_name}')
+        _write_nwb(save_fp, nwb, manager=nwb.io.manager)
+        return save_fp.as_posix()
+
+    def get(self, path):
+        io = NWBHDF5IO(str(pathlib.Path(path)), mode='r')
+        nwb = io.read()
+        current_stim = [obj for obj in nwb.objects.values()
+                        if obj.neurodata_type == 'CurrentClampStimulusSeries'][0]
+        current_stim.io = io
+        return current_stim
+
+
+# ---- instantiate dj.AttributeAdapter objects ----
+
+nwb_file = NWBFile()
 patch_clamp_series = PatchClampSeries()
+current_stim_series = CurrentClampStimulusSeries()
+
+
+# ============= HELPER FUNCTIONS ===============
+
+def _write_nwb(save_fp, nwb2write, manager=None):
+    try:
+        with NWBHDF5IO(save_fp.as_posix(), mode='w', manager=manager) as io:
+            io.write(nwb2write)
+    except Exception as e:
+        if save_fp.exists():
+            save_fp.unlink()
+        raise e
