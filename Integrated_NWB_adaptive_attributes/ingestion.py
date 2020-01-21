@@ -10,7 +10,7 @@ from datetime import datetime
 from dateutil.tz import tzlocal
 import warnings
 
-from pipeline import (subject, experiment, intracellular, behavior, utilities)
+from pipeline import (subject, experiment, intracellular, utilities)
 
 warnings.filterwarnings('ignore')
 
