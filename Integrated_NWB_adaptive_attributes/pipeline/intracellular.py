@@ -117,6 +117,7 @@ class CurrentInjection(dj.Imported):
     definition = """
     -> Cell
     ---
+    nwb_current_stim: <current_stim_series>
     current_injection: longblob
     current_injection_start_time: float  # first timepoint of current injection recording
     current_injection_sampling_rate: float  # (Hz) sampling rate of current injection recording
@@ -136,11 +137,39 @@ class CurrentInjection(dj.Imported):
         print('Insert intracellular data for: subject: {0} - date: {1} - cell: {2}'.format(key['subject_id'],
                                                                                            key['session_time'],
                                                                                            key['cell_id']))
+
+        ci = nwb['acquisition']['timeseries']['current_injection']['data'][()]
+        ci_time_stamps = nwb['acquisition']['timeseries']['current_injection']['timestamps'][()]
+        ci_start_time = ci_time_stamps[0]
+        ci_fs = 1 / np.mean(np.diff(ci_time_stamps))
+
+        cell = (Cell & key).fetch1()
+
+        # -- pynwb.icephys.CurrentClampStimulusSeries --
+        sess_nwb = (experiment.Session & key).fetch1('nwb_file')
+        ci_nwb = sess_nwb.copy()
+        ci_nwb.io = sess_nwb.io
+
+        whole_cell_device = ci_nwb.create_device(name=cell['device_name'])
+        ic_electrode = ci_nwb.create_ic_electrode(
+            name=cell['cell_id'],
+            device=whole_cell_device,
+            description='N/A',
+            filtering='low-pass: 10kHz',
+            location='; '.join([f'{k}: {str(v)}'
+                                for k, v in (BrainLocation & cell).fetch1().items()]))
+
+        current_stim = pynwb.icephys.CurrentClampStimulusSeries(name='CurrentClampStimulus',
+                                                                electrode=ic_electrode, conversion=1e-9,
+                                                                gain=1.0, data=ci,
+                                                                starting_time=ci_start_time, rate=ci_fs)
+        ci_nwb.add_acquisition(current_stim)
+
         # -- CurrentInjection
-        current_injection_time_stamps = nwb['acquisition']['timeseries']['current_injection']['timestamps'].value
-        self.insert1(dict(key, current_injection=nwb['acquisition']['timeseries']['current_injection']['data'].value,
-                          current_injection_start_time=current_injection_time_stamps[0],
-                          current_injection_sampling_rate=1 / np.mean(np.diff(current_injection_time_stamps))))
+        self.insert1(dict(key, nwb_current_stim=ci_nwb,
+                          current_injection=ci,
+                          current_injection_start_time=ci_start_time,
+                          current_injection_sampling_rate=ci_fs))
         nwb.close()
 
 
